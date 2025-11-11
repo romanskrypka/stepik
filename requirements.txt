@@ -1,2 +1,8 @@
+# Core dependencies
 openai>=1.40
 python-dotenv>=1.0
+PyYAML>=6.0
+langchain>=0.2.9
+langchain-openai>=0.1.7
+pydantic>=2.7
+rich>=13.7

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import json
+import yaml
 import argparse
 from datetime import datetime
 from dotenv import load_dotenv
@@ -13,6 +14,7 @@ load_dotenv()
 FAQ_FILE = "data/faq.json"
 ORDERS_FILE = "data/orders.json"
 LOGS_DIR = "logs"
+PROMPTS_FILE = "prompts.yaml"
 
 class EcomBot:
     def __init__(self):
@@ -20,6 +22,9 @@ class EcomBot:
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         self.brand_name = os.getenv("BRAND_NAME", "Shoply")
+        
+        # Загрузка промптов из YAML
+        self.prompts = self.load_prompts()
         
         # Загрузка FAQ
         with open(FAQ_FILE, "r", encoding="utf-8") as f:
@@ -35,6 +40,48 @@ class EcomBot:
         # Создание уникального лог-файла для этой сессии
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.log_file = f"{LOGS_DIR}/session_{timestamp}.jsonl"
+    
+    def load_prompts(self):
+        """Загрузка промптов из YAML файла с поддержкой версионирования"""
+        try:
+            with open(PROMPTS_FILE, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+            
+            prompts = config.get("prompts", {})
+            
+            # Обработка версионированных промптов
+            for prompt_name, prompt_data in prompts.items():
+                # Проверяем, есть ли переменная окружения для версии промпта
+                env_version = os.getenv(f"PROMPT_{prompt_name.upper()}_VERSION")
+                if env_version and env_version in prompt_data.get("versions", {}):
+                    # Используем версию из переменной окружения
+                    prompts[prompt_name]["current"] = env_version
+                # Если переменная не задана, используем версию по умолчанию из YAML
+            
+            print(f"Загружены промпты из {PROMPTS_FILE}")
+            for name, data in prompts.items():
+                print(f"  - {name}: версия {data['current']}")
+            
+            return prompts
+        except Exception as e:
+            print(f"Ошибка при загрузке промптов: {e}. Используются стандартные промпты.")
+            # Возвращаем базовые промпты, если не удалось загрузить из файла
+            return {
+                "main_agent": {
+                    "current": "default",
+                    "versions": {
+                        "default": f"Вы - вежливый и краткий ассистент интернет-магазина {self.brand_name}. Отвечайте кратко и по делу."
+                    }
+                }
+            }
+    
+    def get_prompt(self, prompt_name):
+        """Получение промпта по имени и текущей версии"""
+        if prompt_name in self.prompts:
+            prompt_data = self.prompts[prompt_name]
+            current_version = prompt_data["current"]
+            return prompt_data["versions"].get(current_version, "")
+        return ""
     
     def get_faq_answer(self, question):
         """Поиск ответа на вопрос в FAQ"""
@@ -92,8 +139,10 @@ class EcomBot:
             return faq_response
         
         # Если не найдено в FAQ, обращаемся к LLM
-        # Формирование контекста для модели
-        system_message = f"Вы - вежливый и краткий ассистент интернет-магазина {self.brand_name}. Отвечайте кратко и по делу."
+        # Получение системного промпта
+        system_message = self.get_prompt("main_agent").format(brand_name=self.brand_name)
+        if not system_message:
+            system_message = f"Вы - вежливый и краткий ассистент интернет-магазина {self.brand_name}. Отвечайте кратко и по делу."
         
         # Подготовка сообщений для модели
         messages = [{"role": "system", "content": system_message}]
